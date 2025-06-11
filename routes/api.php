@@ -1,25 +1,33 @@
 <?php
 
-use App\Http\Controllers\Api\V1\Admin\AdminController; // Correct Controller for User management
-use App\Http\Controllers\Api\V1\Admin\AdminPaymentController;
-use App\Http\Controllers\Api\V1\Admin\AdminPromoCodeController; // Import Admin controller
-use App\Http\Controllers\Api\V1\Admin\AdminSettingsController;
-use App\Http\Controllers\Api\V1\Auth\AdminAuthController;
-use App\Http\Controllers\Api\V1\Auth\UserAuthController;
-use App\Http\Controllers\Api\V1\GameController;
-use App\Http\Controllers\Api\V1\OrganizationController;
-use App\Http\Controllers\Api\V1\PlayerController;
-use App\Http\Controllers\Api\V1\PlayerPreferenceController;
-use App\Http\Controllers\Api\V1\PositionController;
-use App\Http\Controllers\Api\V1\PromoCodeController as UserPromoCodeController; // Keep if PromoCodes are implemented
-use App\Http\Controllers\Api\V1\StripeController;
-use App\Http\Controllers\Api\V1\TeamController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\Api\V1\Admin\AdminUtilityController;
+
+// --- Auth Controllers ---
 use App\Http\Controllers\Api\V1\Auth\UniversalLoginController;
+use App\Http\Controllers\Api\V1\Auth\UserAuthController;    // For user-specific auth actions (profile, pwd change)
+use App\Http\Controllers\Api\V1\Auth\AdminAuthController;   // For admin-specific auth actions
 
+// --- User-Facing Resource & Action Controllers ---
+use App\Http\Controllers\Api\V1\TeamController;
+use App\Http\Controllers\Api\V1\PlayerController;
+use App\Http\Controllers\Api\V1\PlayerPreferenceController;
+use App\Http\Controllers\Api\V1\GameController;
+use App\Http\Controllers\Api\V1\PromoCodeController as UserActionPromoCodeController; // Renamed for clarity
+use App\Http\Controllers\Api\V1\StripeController;
+use App\Http\Controllers\Api\V1\OrganizationController; // For user to view orgs
+use App\Http\Controllers\Api\V1\PositionController;       // For user to view positions
+//use App\Http\Controllers\Api\V1\AppConfigController;
 
+// --- Admin Resource Management Controllers ---
+use App\Http\Controllers\Api\V1\Admin\AdminUserController;       // Manages User accounts
+use App\Http\Controllers\Api\V1\Admin\AdminPromoCodeController;  // Manages Promo Codes
+use App\Http\Controllers\Api\V1\Admin\AdminPaymentController;    // Views Payments
+use App\Http\Controllers\Api\V1\Admin\AdminSettingsController;   // Manages App Settings
+use App\Http\Controllers\Api\V1\Admin\AdminUtilityController;    // For migrations/seeds
+
+// --- Organization Panel Controller ---
+use App\Http\Controllers\Api\V1\Organization\OrganizationPanelController;
 
 /*
 |--------------------------------------------------------------------------
@@ -29,56 +37,51 @@ use App\Http\Controllers\Api\V1\Auth\UniversalLoginController;
 
 Route::prefix('v1')->group(function () {
 
-    // Universal Login
-    Route::post('auth/login', [UniversalLoginController::class, 'login']);
+    // --- PUBLIC ROUTES ---
+    Route::post('auth/login', [UniversalLoginController::class, 'login']); // Universal login
 
-    // --- Public Authentication ---
     Route::prefix('user/auth')->controller(UserAuthController::class)->group(function () {
         Route::post('register', 'register');
         Route::post('login', 'login');
-        // Forgot/Reset Password (Public)
         Route::post('forgot-password', 'forgotPassword');
         Route::post('reset-password', 'resetPassword');
-        Route::post('logout', 'logout')->middleware('auth:api_user');
-        Route::post('refresh', 'refresh')->middleware('auth:api_user');
-        Route::get('profile', 'profile')->middleware('auth:api_user');
-        Route::put('profile', 'updateProfile')->middleware('auth:api_user');
-        Route::post('change-password', 'changePassword')->middleware('auth:api_user');
     });
 
-    Route::prefix('admin/auth')->controller(AdminAuthController::class)->group(function () {
-        Route::post('login', 'login');
-        Route::post('logout', 'logout')->middleware('auth:api_admin');
-        Route::post('refresh', 'refresh')->middleware('auth:api_admin');
-        Route::get('profile', 'profile')->middleware('auth:api_admin');
-        Route::put('profile', 'updateProfile')->middleware('auth:api_admin');
-        Route::post('change-password', 'changePassword')->middleware('auth:api_admin');
-    });
+    Route::post('stripe/webhook', [StripeController::class, 'handleWebhook'])->name('stripe.webhook.api');
+//    Route::get('app-config', [AppConfigController::class, 'getPublicConfig']);
 
 
-    // --- Protected User Routes ---
+    // --- USER AUTHENTICATED ROUTES (auth:api_user) ---
     Route::middleware('auth:api_user')->group(function () {
-        // Team Management
+        Route::prefix('user/auth')->controller(UserAuthController::class)->group(function () {
+            Route::post('logout', 'logout');
+            Route::post('refresh', 'refresh');
+            Route::get('profile', 'profile');
+            Route::put('profile', 'updateProfile');
+            Route::post('change-password', 'changePassword');
+            Route::post('validate-organization-access-code', 'validateOrganizationAccessCode');
+        });
+
+        // Team Management (User creates team under an Org Code they provide)
         Route::apiResource('teams', TeamController::class);
         Route::get('teams/{team}/players', [TeamController::class, 'listPlayers']);
 
-        // Player Management (within Team context for creation)
+        // Player Management
         Route::post('teams/{team}/players', [PlayerController::class, 'store']);
+        Route::get('players/{player}', [PlayerController::class, 'show']);
         Route::put('players/{player}', [PlayerController::class, 'update']);
         Route::delete('players/{player}', [PlayerController::class, 'destroy']);
-        Route::get('players/{player}', [PlayerController::class, 'show']); // Added
+
         // Player Preferences
         Route::post('players/{player}/preferences', [PlayerPreferenceController::class, 'store']);
         Route::get('players/{player}/preferences', [PlayerPreferenceController::class, 'show']);
-        Route::put('teams/{team}/bulk-player-preferences', [PlayerPreferenceController::class, 'bulkUpdateByTeam']);
         Route::get('teams/{team}/bulk-player-preferences', [PlayerPreferenceController::class, 'bulkShowByTeam']);
+        Route::put('teams/{team}/bulk-player-preferences', [PlayerPreferenceController::class, 'bulkUpdateByTeam']);
 
         // Game Management
         Route::get('teams/{team}/games', [GameController::class, 'index']);
         Route::post('teams/{team}/games', [GameController::class, 'store']);
-        Route::get('games/{game}', [GameController::class, 'show']);
-        Route::put('games/{game}', [GameController::class, 'update']); // Updates game details, not lineup
-        Route::delete('games/{game}', [GameController::class, 'destroy']);
+        Route::apiResource('games', GameController::class)->except(['index', 'store']); // show, update, destroy for /games/{game}
 
         // Lineup & PDF
         Route::get('games/{game}/lineup', [GameController::class, 'getLineup']);
@@ -86,58 +89,76 @@ Route::prefix('v1')->group(function () {
         Route::post('games/{game}/autocomplete-lineup', [GameController::class, 'autocompleteLineup']);
         Route::get('games/{game}/pdf-data', [GameController::class, 'getLineupPdfData']);
 
-        // Supporting Lists
-        Route::get('organizations', [OrganizationController::class, 'index']); // User list view
-        Route::get('organizations/{organization}', [OrganizationController::class, 'showForUser']); // User list view
-        // --- NEW ROUTE: Get/Check Organization by Code ---
-        Route::get('organizations/by-code/{organization_code}', [OrganizationController::class, 'showByCode']);
-        Route::get('positions', [PositionController::class, 'index']);         // User list view
-
-        Route::post('user/validate-organization-access-code', [UserAuthController::class, 'validateOrganizationAccessCode']);
+        // User initiates NEW Organization subscription
+        Route::post('organization/create-subscription-intent', [StripeController::class, 'createOrganizationSubscriptionIntent']);
         Route::get('user/subscription/generate-payment-link', [StripeController::class, 'generateWebPaymentLink']);
-        // --- Stripe Payment Initiation ---
-        Route::post('teams/{team}/create-payment-intent', [StripeController::class, 'createTeamPaymentIntent']); // Added
-        Route::get('payment-details', [StripeController::class, 'showUnlockDetails']); // Added
-        // --- User Payment History ---
+
+        // User redeems Promo Code (to create/activate a new Organization)
+        Route::post('promo-codes/redeem', [UserActionPromoCodeController::class, 'redeem']);
+        Route::get('promo-codes/redemption-history', [UserActionPromoCodeController::class, 'redemptionHistory']);
+
+        // User Payment History (payments they made for orgs)
         Route::get('payments/history', [StripeController::class, 'userPaymentHistory']);
 
-        Route::post('promo-codes/redeem', [UserPromoCodeController::class, 'redeem']); // Added
-        Route::get('promo-codes/redemption-history', [UserPromoCodeController::class, 'redemptionHistory']);
+        // UserOrganization Activation History
+        Route::get('user/organization-activation-history', [UserAuthController::class, 'organizationActivationHistory']);
 
-    }); // End User middleware group
+        // Supporting Lists for User UI
+        Route::get('organizations', [OrganizationController::class, 'index']);
+        Route::get('organizations/by-code/{organization_code}', [OrganizationController::class, 'showByCode']);
+        Route::get('positions', [PositionController::class, 'index']);
+        Route::get('payment-details', [StripeController::class, 'getPaymentDetails']); // Global payment price details
+    });
 
-    // Stripe Webhook
-    Route::post('stripe/webhook', [StripeController::class, 'handleWebhook'])->name('stripe.webhook'); // Added & named
+    Route::prefix('admin/auth')->controller(AdminAuthController::class)->group(function () {
+        Route::post('login', 'login');
+    });
 
+    // --- ADMIN AUTHENTICATED ROUTES (auth:api_admin) ---
+    Route::prefix('admin')->middleware('auth:api_admin')->group(function () {
+        Route::prefix('auth')->controller(AdminAuthController::class)->group(function() {
+            Route::post('logout', 'logout');
+            Route::post('refresh', 'refresh');
+            Route::get('profile', 'profile');
+            Route::put('profile', 'updateProfile');
+            Route::post('change-password', 'changePassword');
+        });
 
-    // --- Protected Admin Routes ---
-    Route::middleware('auth:api_admin')->prefix('admin')->group(function () {
+        Route::apiResource('organizations', OrganizationController::class); // Admin full CRUD for Orgs
+        Route::apiResource('positions', PositionController::class);     // Admin full CRUD for Positions
+        Route::apiResource('users', AdminUserController::class);             // Admin manages User accounts
+        Route::apiResource('promo-codes', AdminPromoCodeController::class);  // Admin manages Promo Codes
+
+        Route::get('payments', [AdminPaymentController::class, 'index']);
+        Route::get('payments/{payment}', [AdminPaymentController::class, 'show']);
+
+        Route::get('settings', [AdminSettingsController::class, 'show']);
+        Route::put('settings', [AdminSettingsController::class, 'update']);
 
         Route::prefix('utils')->controller(AdminUtilityController::class)->group(function () {
             Route::post('migrate-and-seed', 'migrateAndSeed');
             Route::post('migrate-fresh-and-seed', 'migrateFreshAndSeed');
         });
+    });
 
-        // Organization Management (Full CRUD except index handled separately)
-        Route::apiResource('organizations', OrganizationController::class)->except(['index']);
-        Route::get('organizations', [OrganizationController::class, 'index']); // Admin list view (might differ from user view)
-        // --- NEW ROUTE: Get/Check Organization by Code ---
-        Route::get('organizations/by-code/{organization_code}', [OrganizationController::class, 'showByCode']);
 
-        Route::get('settings', [AdminSettingsController::class, 'show']);
-        Route::put('settings', [AdminSettingsController::class, 'update']);
-        // Position Management (Full CRUD except index handled separately)
-        Route::apiResource('positions', PositionController::class)->except(['index']);
-        Route::get('positions', [PositionController::class, 'index']);         // Admin list view (might differ from user view)
+    // --- ORGANIZATION PANEL ROUTES ---
+    // Public login for Organization Panel (uses Organization code as username)
+    Route::post('organization-panel/auth/login', [OrganizationPanelController::class, 'login']);
 
-        // User Management (Full CRUD) - Using AdminUserController
-        Route::apiResource('users', AdminController::class);
+    // Protected Organization Panel Routes (Requires Organization JWT: auth:api_org_admin)
+    Route::prefix('organization-panel')->middleware('auth:api_org_admin')->group(function () {
+        Route::post('auth/logout', [OrganizationPanelController::class, 'logout']);
+        Route::get('profile', [OrganizationPanelController::class, 'profile']); // Organization's own details
+        Route::post('auth/change-password', [OrganizationPanelController::class, 'changePassword']);
 
-        Route::apiResource('promo-codes', AdminPromoCodeController::class); // Added
+        Route::get('teams', [OrganizationPanelController::class, 'listTeams']);
+        Route::get('teams/{team}', [OrganizationPanelController::class, 'showTeam']);
+        Route::delete('teams/{team}', [OrganizationPanelController::class, 'deleteTeam']);
 
-        Route::apiResource('payments', AdminPaymentController::class)->only([
-            'index', 'show' // Admins likely only need to view payments, not create/edit/delete them via API
-        ]);
-    }); // End Admin middleware group
+        // Organization renews its own subscription
+        Route::post('subscription/create-renewal-intent', [OrganizationPanelController::class, 'createSubscriptionRenewalIntent']);
+        Route::get('subscription/generate-renewal-link', [OrganizationPanelController::class, 'generateWebRenewalLink']);
+    });
 
-}); // End V1 prefix group
+});

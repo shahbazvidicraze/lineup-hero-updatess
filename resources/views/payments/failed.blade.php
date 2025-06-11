@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Purchase Your Team</title>
+    <title>{{ $paymentTitle ?? 'Complete Your Payment' }} - {{ config('app.name') }}</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://js.stripe.com/v3/"></script>
@@ -117,15 +117,15 @@
     <div class="left-panel text-center">
         <h2>PURCHASE YOUR <span class="fw-bold">TEAM</span></h2>
         <h4 class="mb-2 text-secondary"></h4>
-        <div class="price-text my-5">${{ number_format($amount / 100, 2) }} {{ strtoupper($currency) }}</div>
+        <div class="price-text my-5">${{ $amount }} {{ strtoupper($currency) }}</div>
         <div class="border card rounded p-3 text-start">
             <div class="d-flex justify-content-between mb-2">
                 <span>Platform basic</span>
-                <strong>${{ number_format($amount / 100, 2) }}</strong>
+                <strong>${{ $amount }}</strong>
             </div>
             <div class="d-flex justify-content-between mb-2">
                 <span>Subtotal</span>
-                <strong>${{ number_format($amount / 100, 2) }}</strong>
+                <strong>${{ $amount }}</strong>
             </div>
             <div class="d-flex justify-content-between mb-2">
                 <span>Tax</span>
@@ -166,7 +166,7 @@
 </div>
 
 <!-- Failed Modal -->
-<div class="modal fade" id="paymentFailedModal" tabindex="-1" aria-labelledby="paymentFailedModalLabel" aria-hidden="true">
+<div class="modal fade" id="paymentFailedModal" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1" aria-labelledby="paymentFailedModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content text-center">
             <div class="modal-header border-0">
